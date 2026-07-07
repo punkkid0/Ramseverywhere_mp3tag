@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Backups & temp
+*.bak
+_remux_temp/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local dev artifacts
+terminals/
+Screenshot*.png
+
+# Build
+dist/
+build/
+*.spec

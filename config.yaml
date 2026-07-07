@@ -1,0 +1,33 @@
+# MP3 auto-tagger configuration
+
+site_names:
+  - CeeNaija.com
+  - waploaded.com
+  - waploaded
+  - jointearn.com
+  - jointearn
+  - waptrick.com
+  - waptrick
+  - naijaloaded.com
+  - naijaloaded
+  - tooxclusive.com
+  - tooxclusive
+  - justnaija.com
+  - justnaija
+
+tags:
+  comment: "downloaded from jointearn.com"
+
+cover:
+  size: 1000       # square pixels (1000x1000) — standard album art
+  quality: 90      # JPEG quality (1-100)
+
+ffmpeg:
+  path: ffmpeg
+  timeout_seconds: 60
+
+backup:
+  suffix: ".bak"
+
+defaults:
+  genre: ""
