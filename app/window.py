@@ -6,27 +6,19 @@ from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
 
-from app.models import AppState, SongRow
+from app.models import AppState
 from app.services import (
-    apply_songs,
-    default_csv_path,
-    load_library,
-    save_library,
-    sync_library,
+    apply_to_songs,
+    build_previews,
+    list_mp3_items,
+    validate_cover,
 )
 from app.settings_dialog import SettingsDialog
+from core.auto_tag import TagJobOptions
 from core.config import AppConfig
 from core.remux import ffmpeg_available
 
 logger = logging.getLogger(__name__)
-
-STATUS_LABELS = {
-    "pending": "Pending",
-    "updated": "Updated",
-    "failed": "Failed",
-    "skipped": "Skipped",
-    "remuxed": "Remuxed",
-}
 
 
 class Mp3TagApp(ctk.CTk):
@@ -34,80 +26,136 @@ class Mp3TagApp(ctk.CTk):
         super().__init__()
 
         self.config_data = AppConfig.load()
-        self.library = AppState()
+        self.state = AppState()
         self._cancel_requested = False
         self._busy = False
-        self._status_filter = "all"
-        self._search_text = ""
+        self.last_result = None
+        self._song_index_by_item: dict[str, int] = {}
 
-        self.title("MP3 Tag Editor")
-        self.geometry("1180x760")
-        self.minsize(960, 640)
+        self.title("Ramseverywhere MP3 Tag")
+        self.geometry("1100x720")
+        self.minsize(900, 600)
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("green")
 
         self._build_layout()
-        self._show_empty_state()
+        self._set_status("Choose a music folder to get started.")
 
     def _build_layout(self) -> None:
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(3, weight=1)
 
-        top = ctk.CTkFrame(self)
-        top.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
-        top.grid_columnconfigure(1, weight=1)
+        # --- Folder row ---
+        folder_frame = ctk.CTkFrame(self)
+        folder_frame.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
+        folder_frame.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(top, text="Music folder:", width=100, anchor="w").grid(
+        ctk.CTkLabel(folder_frame, text="Music folder:", width=100).grid(
             row=0, column=0, padx=(12, 8), pady=12, sticky="w"
         )
         self.folder_var = tk.StringVar()
-        ctk.CTkEntry(top, textvariable=self.folder_var).grid(
+        ctk.CTkEntry(folder_frame, textvariable=self.folder_var).grid(
             row=0, column=1, padx=8, pady=12, sticky="ew"
         )
-        ctk.CTkButton(top, text="Browse", width=90, command=self._browse_folder).grid(
+        ctk.CTkButton(folder_frame, text="Browse", width=90, command=self._browse_folder).grid(
             row=0, column=2, padx=8, pady=12
         )
-        ctk.CTkButton(top, text="Sync folder", width=110, command=self._sync_folder).grid(
+        ctk.CTkButton(folder_frame, text="Settings", width=90, command=self._open_settings).grid(
+            row=0, column=3, padx=(8, 12), pady=12
+        )
+        self.chip_label = ctk.CTkLabel(
+            folder_frame, text=self._chip_text(), anchor="e", text_color="#9cdcfe"
+        )
+        self.chip_label.grid(row=1, column=0, columnspan=4, sticky="e", padx=12, pady=(0, 10))
+
+        # --- Tag options ---
+        opts = ctk.CTkFrame(self)
+        opts.grid(row=1, column=0, sticky="ew", padx=16, pady=8)
+        for col in (1, 3, 5, 7):
+            opts.grid_columnconfigure(col, weight=1)
+
+        ctk.CTkLabel(
+            opts, text="Tag options", font=ctk.CTkFont(weight="bold")
+        ).grid(row=0, column=0, columnspan=8, sticky="w", padx=12, pady=(12, 8))
+
+        self.artist_var = tk.StringVar()
+        self.genre_var = tk.StringVar()
+        self.year_var = tk.StringVar()
+        self.album_var = tk.StringVar()
+        self.track_var = tk.StringVar()
+        self.cover_var = tk.StringVar()
+        self.mode_var = tk.StringVar(value="auto")
+
+        fields = [
+            ("Artist *", self.artist_var, 0, 1),
+            ("Genre", self.genre_var, 2, 3),
+            ("Year", self.year_var, 4, 5),
+            ("Mode", self.mode_var, 6, 7),
+        ]
+        for label, var, label_col, entry_col in fields[:3]:
+            ctk.CTkLabel(opts, text=f"{label}:").grid(
+                row=1, column=label_col, padx=(12, 6), pady=6, sticky="e"
+            )
+            ctk.CTkEntry(opts, textvariable=var).grid(
+                row=1, column=entry_col, padx=6, pady=6, sticky="ew"
+            )
+
+        ctk.CTkLabel(opts, text="Mode:").grid(row=1, column=6, padx=(12, 6), pady=6, sticky="e")
+        ctk.CTkOptionMenu(
+            opts,
+            variable=self.mode_var,
+            values=["auto", "single", "album"],
+            width=120,
+        ).grid(row=1, column=7, padx=6, pady=6, sticky="ew")
+
+        ctk.CTkLabel(opts, text="Album:").grid(row=2, column=0, padx=(12, 6), pady=6, sticky="e")
+        ctk.CTkEntry(opts, textvariable=self.album_var).grid(
+            row=2, column=1, padx=6, pady=6, sticky="ew"
+        )
+        ctk.CTkLabel(opts, text="Track:").grid(row=2, column=2, padx=(12, 6), pady=6, sticky="e")
+        ctk.CTkEntry(opts, textvariable=self.track_var).grid(
+            row=2, column=3, padx=6, pady=6, sticky="ew"
+        )
+        ctk.CTkLabel(opts, text="Cover:").grid(row=2, column=4, padx=(12, 6), pady=6, sticky="e")
+        ctk.CTkEntry(opts, textvariable=self.cover_var).grid(
+            row=2, column=5, columnspan=2, padx=6, pady=6, sticky="ew"
+        )
+        ctk.CTkButton(opts, text="Browse", width=80, command=self._browse_cover).grid(
+            row=2, column=7, padx=(6, 12), pady=6, sticky="e"
+        )
+
+        # --- Actions ---
+        actions = ctk.CTkFrame(self)
+        actions.grid(row=2, column=0, sticky="ew", padx=16, pady=8)
+        actions.grid_columnconfigure(4, weight=1)
+
+        ctk.CTkButton(actions, text="Preview changes", command=self._preview).grid(
+            row=0, column=0, padx=(12, 8), pady=12
+        )
+        ctk.CTkButton(actions, text="Apply tags", command=self._apply).grid(
+            row=0, column=1, padx=8, pady=12
+        )
+        ctk.CTkButton(actions, text="Select all", width=90, command=self._select_all).grid(
+            row=0, column=2, padx=8, pady=12
+        )
+        ctk.CTkButton(actions, text="Select none", width=90, command=self._select_none).grid(
             row=0, column=3, padx=8, pady=12
         )
-        ctk.CTkButton(top, text="Settings", width=90, command=self._open_settings).grid(
-            row=0, column=4, padx=(8, 12), pady=12
+        self.selection_label = ctk.CTkLabel(actions, text="0 songs")
+        self.selection_label.grid(row=0, column=4, padx=12, pady=12, sticky="e")
+        self.cancel_button = ctk.CTkButton(
+            actions,
+            text="Cancel",
+            fg_color="#8b3a3a",
+            hover_color="#a84b4b",
+            command=self._request_cancel,
+            state="disabled",
         )
+        self.cancel_button.grid(row=0, column=5, padx=(8, 12), pady=12)
 
-        self.status_chip = ctk.CTkLabel(
-            top,
-            text=self._chip_text(),
-            anchor="e",
-            text_color="#9cdcfe",
-        )
-        self.status_chip.grid(row=1, column=0, columnspan=5, sticky="e", padx=12, pady=(0, 10))
-
-        toolbar = ctk.CTkFrame(self)
-        toolbar.grid(row=1, column=0, sticky="ew", padx=16, pady=8)
-        toolbar.grid_columnconfigure(2, weight=1)
-
-        ctk.CTkLabel(toolbar, text="Search:").grid(row=0, column=0, padx=(12, 6), pady=10)
-        self.search_var = tk.StringVar()
-        self.search_var.trace_add("write", lambda *_: self._on_search_changed())
-        ctk.CTkEntry(toolbar, textvariable=self.search_var, width=220).grid(
-            row=0, column=1, padx=6, pady=10, sticky="w"
-        )
-
-        ctk.CTkLabel(toolbar, text="Status:").grid(row=0, column=2, padx=(18, 6), pady=10, sticky="e")
-        self.filter_menu = ctk.CTkOptionMenu(
-            toolbar,
-            values=["All", "Pending", "Updated", "Failed", "Skipped"],
-            command=self._on_filter_changed,
-            width=130,
-        )
-        self.filter_menu.set("All")
-        self.filter_menu.grid(row=0, column=3, padx=6, pady=10, sticky="e")
-
-        self.selection_label = ctk.CTkLabel(toolbar, text="0 selected")
-        self.selection_label.grid(row=0, column=4, padx=12, pady=10, sticky="e")
-
+        # --- Song table ---
         table_frame = ctk.CTkFrame(self)
-        table_frame.grid(row=2, column=0, sticky="nsew", padx=16, pady=8)
+        table_frame.grid(row=3, column=0, sticky="nsew", padx=16, pady=8)
         table_frame.grid_columnconfigure(0, weight=1)
         table_frame.grid_rowconfigure(0, weight=1)
 
@@ -119,17 +167,11 @@ class Mp3TagApp(ctk.CTk):
             foreground="#f2f2f2",
             fieldbackground="#2b2b2b",
             rowheight=28,
-            borderwidth=0,
         )
-        style.configure(
-            "Songs.Treeview.Heading",
-            background="#1f1f1f",
-            foreground="#ffffff",
-            relief="flat",
-        )
+        style.configure("Songs.Treeview.Heading", background="#1f1f1f", foreground="#ffffff")
         style.map("Songs.Treeview", background=[("selected", "#1f6aa5")])
 
-        columns = ("filename", "title", "artist", "album", "genre", "status", "cover")
+        columns = ("filename", "title", "artist", "album", "mode", "status")
         self.tree = ttk.Treeview(
             table_frame,
             columns=columns,
@@ -137,104 +179,24 @@ class Mp3TagApp(ctk.CTk):
             selectmode="extended",
             style="Songs.Treeview",
         )
-        headings = {
-            "filename": ("Filename", 180),
-            "title": ("Title", 200),
-            "artist": ("Artist", 140),
-            "album": ("Album", 120),
-            "genre": ("Genre", 100),
-            "status": ("Status", 90),
-            "cover": ("Cover", 120),
-        }
-        for key, (label, width) in headings.items():
+        for key, label, width in [
+            ("filename", "Filename", 220),
+            ("title", "Title", 180),
+            ("artist", "Artist", 120),
+            ("album", "Album", 140),
+            ("mode", "Mode", 70),
+            ("status", "Status", 100),
+        ]:
             self.tree.heading(key, text=label)
             self.tree.column(key, width=width, anchor="w")
 
-        scroll_y = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scroll_y.set)
+        scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
         self.tree.grid(row=0, column=0, sticky="nsew")
-        scroll_y.grid(row=0, column=1, sticky="ns")
-        self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+        scroll.grid(row=0, column=1, sticky="ns")
+        self.tree.bind("<<TreeviewSelect>>", self._on_select)
 
-        bulk = ctk.CTkFrame(self)
-        bulk.grid(row=3, column=0, sticky="ew", padx=16, pady=8)
-        for col in range(8):
-            bulk.grid_columnconfigure(col, weight=1 if col in (1, 3, 5, 7) else 0)
-
-        ctk.CTkLabel(
-            bulk,
-            text="Bulk edit (selected rows)",
-            font=ctk.CTkFont(weight="bold"),
-        ).grid(row=0, column=0, columnspan=8, sticky="w", padx=12, pady=(12, 8))
-
-        self.field_vars = {
-            "artist": tk.StringVar(),
-            "album": tk.StringVar(),
-            "track": tk.StringVar(),
-            "genre": tk.StringVar(),
-            "comment": tk.StringVar(),
-            "cover": tk.StringVar(),
-        }
-        field_layout = [
-            ("Artist", "artist", 0, 1),
-            ("Album", "album", 2, 3),
-            ("Track", "track", 4, 5),
-            ("Genre", "genre", 6, 7),
-        ]
-        for label, key, label_col, entry_col in field_layout:
-            ctk.CTkLabel(bulk, text=f"{label}:").grid(
-                row=1, column=label_col, padx=(12, 6), pady=6, sticky="e"
-            )
-            ctk.CTkEntry(bulk, textvariable=self.field_vars[key]).grid(
-                row=1, column=entry_col, padx=6, pady=6, sticky="ew"
-            )
-
-        ctk.CTkLabel(bulk, text="Comment:").grid(
-            row=2, column=0, padx=(12, 6), pady=6, sticky="e"
-        )
-        ctk.CTkEntry(bulk, textvariable=self.field_vars["comment"]).grid(
-            row=2, column=1, columnspan=3, padx=6, pady=6, sticky="ew"
-        )
-        ctk.CTkLabel(bulk, text="Cover:").grid(
-            row=2, column=4, padx=(12, 6), pady=6, sticky="e"
-        )
-        ctk.CTkEntry(bulk, textvariable=self.field_vars["cover"]).grid(
-            row=2, column=5, columnspan=2, padx=6, pady=6, sticky="ew"
-        )
-        ctk.CTkButton(bulk, text="Browse", width=80, command=self._browse_cover).grid(
-            row=2, column=7, padx=(6, 12), pady=6, sticky="e"
-        )
-
-        actions = ctk.CTkFrame(bulk, fg_color="transparent")
-        actions.grid(row=3, column=0, columnspan=8, sticky="ew", padx=12, pady=(4, 12))
-        actions.grid_columnconfigure(4, weight=1)
-
-        ctk.CTkButton(
-            actions, text="Apply to selected", command=self._apply_selected
-        ).grid(row=0, column=0, padx=(0, 8))
-        ctk.CTkButton(actions, text="Apply to all", command=self._apply_all).grid(
-            row=0, column=1, padx=8
-        )
-        ctk.CTkButton(actions, text="Save CSV", command=self._save_csv).grid(
-            row=0, column=2, padx=8
-        )
-        self.dry_run_var = tk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
-            actions, text="Dry run", variable=self.dry_run_var
-        ).grid(row=0, column=3, padx=12)
-        ctk.CTkButton(
-            actions, text="Export report", command=self._export_report
-        ).grid(row=0, column=5, padx=(8, 0))
-        self.cancel_button = ctk.CTkButton(
-            actions,
-            text="Cancel",
-            fg_color="#8b3a3a",
-            hover_color="#a84b4b",
-            command=self._request_cancel,
-            state="disabled",
-        )
-        self.cancel_button.grid(row=0, column=6, padx=(8, 0))
-
+        # --- Bottom ---
         bottom = ctk.CTkFrame(self)
         bottom.grid(row=4, column=0, sticky="ew", padx=16, pady=(8, 16))
         bottom.grid_columnconfigure(0, weight=1)
@@ -243,130 +205,83 @@ class Mp3TagApp(ctk.CTk):
         self.progress.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
         self.progress.set(0)
 
-        self.progress_label = ctk.CTkLabel(
-            bottom, text="Choose a music folder to get started.", anchor="w"
-        )
-        self.progress_label.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 6))
+        self.status_label = ctk.CTkLabel(bottom, text="", anchor="w")
+        self.status_label.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 6))
 
         self.summary_label = ctk.CTkLabel(
-            bottom,
-            text="Updated: 0   Skipped: 0   Failed: 0   Remuxed: 0",
-            anchor="w",
-            text_color="#b0b0b0",
+            bottom, text="Updated: 0  Failed: 0  Remuxed: 0", anchor="w", text_color="#b0b0b0"
         )
         self.summary_label.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
 
-        self._song_index_by_item: dict[str, int] = {}
-
     def _chip_text(self) -> str:
         ffmpeg_status = "available" if ffmpeg_available(self.config_data.ffmpeg_path) else "missing"
-        return f"ffmpeg: {ffmpeg_status}   |   config loaded"
+        return f"ffmpeg: {ffmpeg_status}  |  cover size: {self.config_data.cover_size}px"
 
-    def _show_empty_state(self) -> None:
-        self.progress_label.configure(text="Choose a music folder to get started.")
+    def _set_status(self, text: str) -> None:
+        self.status_label.configure(text=text)
+
+    def _job_options(self) -> TagJobOptions:
+        return TagJobOptions(
+            artist=self.artist_var.get().strip(),
+            genre=self.genre_var.get().strip(),
+            year=self.year_var.get().strip(),
+            album=self.album_var.get().strip(),
+            track=self.track_var.get().strip(),
+            mode=self.mode_var.get().strip(),
+            cover=self.cover_var.get().strip(),
+        )
 
     def _browse_folder(self) -> None:
         folder = filedialog.askdirectory(title="Select music folder")
-        if not folder:
-            return
-        self._set_folder(folder)
+        if folder:
+            self._load_folder(folder)
 
-    def _set_folder(self, folder: str) -> None:
-        self.library.folder = folder
-        self.library.csv_path = default_csv_path(folder)
+    def _load_folder(self, folder: str) -> None:
+        self.state.folder = folder
         self.folder_var.set(folder)
-        self.library.songs = load_library(folder, self.library.csv_path)
+        self.state.songs = list_mp3_items(folder)
+        for song in self.state.songs:
+            song.selected = True
         self._refresh_tree()
-        self.progress_label.configure(
-            text=f"Loaded {len(self.library.songs)} song(s) from {Path(self.library.csv_path).name}"
+        self._set_status(f"Loaded {len(self.state.songs)} song(s). Fill artist, then Preview or Apply.")
+        self.selection_label.configure(text=f"{len(self.state.songs)} songs")
+
+    def _browse_cover(self) -> None:
+        initial = self.state.folder or str(Path.home())
+        path = filedialog.askopenfilename(
+            title="Select cover image",
+            initialdir=initial,
+            filetypes=[("Images", "*.jpg *.jpeg *.png *.webp *.gif *.bmp")],
         )
-
-    def _sync_folder(self) -> None:
-        if not self.library.folder:
-            messagebox.showwarning("No folder", "Choose a music folder first.")
-            return
-        try:
-            songs, new_files = sync_library(
-                self.library.folder,
-                self.library.csv_path,
-                self.config_data,
-            )
-        except Exception as exc:
-            messagebox.showerror("Sync failed", str(exc))
-            return
-
-        self.library.songs = songs
-        self._refresh_tree()
-        if new_files:
-            messagebox.showinfo(
-                "Sync complete",
-                f"Added {len(new_files)} new file(s).\nEdit tags below, then Apply.",
-            )
-        else:
-            messagebox.showinfo("Sync complete", "CSV is already up to date.")
+        if path:
+            self.cover_var.set(path)
 
     def _refresh_tree(self) -> None:
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        self.tree.delete(*self.tree.get_children())
         self._song_index_by_item.clear()
 
-        for index, song in enumerate(self.library.songs):
-            if not self._matches_filters(song):
-                continue
-            status = STATUS_LABELS.get(song.status, song.status.title())
-            if song.is_new and song.status == "pending":
-                status = "NEW"
+        for index, song in enumerate(self.state.songs):
+            preview = song.preview
             values = (
                 song.filename,
-                song.title,
-                song.artist,
-                song.album,
-                song.genre,
-                status,
-                song.cover,
+                preview.title_after if preview else "",
+                preview.artist_after if preview else "",
+                preview.after.get("album", "") if preview else "",
+                song.mode,
+                song.status,
             )
             item_id = self.tree.insert("", "end", values=values)
             self._song_index_by_item[item_id] = index
-            if song.status == "failed":
+            if not song.selected:
+                self.tree.item(item_id, tags=("unselected",))
+            elif song.status == "failed":
                 self.tree.item(item_id, tags=("failed",))
-            elif song.status == "updated":
-                self.tree.item(item_id, tags=("updated",))
-            elif song.is_new:
-                self.tree.item(item_id, tags=("new",))
+            elif song.status in {"updated", "preview"}:
+                self.tree.item(item_id, tags=("ok",))
 
         self.tree.tag_configure("failed", foreground="#ff7b7b")
-        self.tree.tag_configure("updated", foreground="#7dffb2")
-        self.tree.tag_configure("new", foreground="#ffd27d")
-
-    def _matches_filters(self, song: SongRow) -> bool:
-        query = self._search_text.strip().lower()
-        if query:
-            haystack = " ".join(
-                [
-                    song.filename,
-                    song.title,
-                    song.artist,
-                    song.album,
-                    song.genre,
-                    song.comment,
-                ]
-            ).lower()
-            if query not in haystack:
-                return False
-
-        if self._status_filter == "all":
-            return True
-        if self._status_filter == "pending":
-            return song.status == "pending"
-        return song.status == self._status_filter
-
-    def _on_search_changed(self) -> None:
-        self._search_text = self.search_var.get()
-        self._refresh_tree()
-
-    def _on_filter_changed(self, value: str) -> None:
-        self._status_filter = value.lower()
-        self._refresh_tree()
+        self.tree.tag_configure("ok", foreground="#7dffb2")
+        self.tree.tag_configure("unselected", foreground="#888888")
 
     def _selected_indices(self) -> list[int]:
         indices = []
@@ -376,156 +291,134 @@ class Mp3TagApp(ctk.CTk):
                 indices.append(index)
         return sorted(set(indices))
 
-    def _on_tree_select(self, _event=None) -> None:
-        indices = self._selected_indices()
-        self.selection_label.configure(text=f"{len(indices)} selected")
-        if len(indices) == 1:
-            song = self.library.songs[indices[0]]
-            self.field_vars["artist"].set(song.artist)
-            self.field_vars["album"].set(song.album)
-            self.field_vars["track"].set(song.track)
-            self.field_vars["genre"].set(song.genre)
-            self.field_vars["comment"].set(song.comment)
-            self.field_vars["cover"].set(song.cover)
+    def _on_select(self, _event=None) -> None:
+        selected = set(self._selected_indices())
+        for index, song in enumerate(self.state.songs):
+            song.selected = index in selected
+        count = sum(1 for song in self.state.songs if song.selected)
+        self.selection_label.configure(text=f"{count} selected")
 
-    def _apply_bulk_fields_to_indices(self, indices: list[int]) -> None:
-        updates = {key: var.get().strip() for key, var in self.field_vars.items()}
-        for index in indices:
-            song = self.library.songs[index]
-            for key, value in updates.items():
-                if value:
-                    setattr(song, key, value)
+    def _select_all(self) -> None:
+        self.tree.selection_set(self.tree.get_children())
+        for song in self.state.songs:
+            song.selected = True
+        self.selection_label.configure(text=f"{len(self.state.songs)} selected")
 
-    def _browse_cover(self) -> None:
-        if not self.library.folder:
+    def _select_none(self) -> None:
+        self.tree.selection_remove(self.tree.get_children())
+        for song in self.state.songs:
+            song.selected = False
+        self.selection_label.configure(text="0 selected")
+
+    def _validate_form(self) -> bool:
+        if not self.state.folder:
             messagebox.showwarning("No folder", "Choose a music folder first.")
-            return
-        path = filedialog.askopenfilename(
-            title="Select cover image",
-            initialdir=self.library.folder,
-            filetypes=[
-                ("Images", "*.jpg *.jpeg *.png *.webp *.gif *.bmp"),
-                ("All files", "*.*"),
-            ],
-        )
-        if not path:
-            return
-        cover_path = Path(path)
-        folder_path = Path(self.library.folder)
-        if cover_path.parent == folder_path:
-            self.field_vars["cover"].set(cover_path.name)
-        else:
-            self.field_vars["cover"].set(str(cover_path))
+            return False
+        if not self.artist_var.get().strip():
+            messagebox.showwarning("Artist required", "Enter an artist name.")
+            return False
+        if not self.state.songs:
+            messagebox.showwarning("No songs", "No MP3 files found in that folder.")
+            return False
+        cover_error = validate_cover(self.state.songs, self.cover_var.get())
+        if cover_error:
+            messagebox.showerror("Cover not found", cover_error)
+            return False
+        return True
 
-    def _save_csv(self) -> None:
-        if not self.library.csv_path:
-            messagebox.showwarning("No CSV", "Load a folder first.")
+    def _preview(self) -> None:
+        if not self._validate_form():
             return
-        save_library(self.library.songs, self.library.csv_path)
-        messagebox.showinfo("Saved", f"CSV saved to {self.library.csv_path}")
+        options = self._job_options()
+        build_previews(self.state.songs, options, self.config_data)
+        self._refresh_tree()
+        self._set_status("Preview ready — no files were modified. Click Apply tags to write.")
 
-    def _apply_selected(self) -> None:
-        indices = self._selected_indices()
-        if not indices:
-            messagebox.showwarning("No selection", "Select one or more songs first.")
-            return
-        self._apply_bulk_fields_to_indices(indices)
-        self._start_apply(indices)
+    def _sync_selection_from_tree(self) -> None:
+        selected = set(self._selected_indices())
+        if selected:
+            for index, song in enumerate(self.state.songs):
+                song.selected = index in selected
 
-    def _apply_all(self) -> None:
-        if not self.library.songs:
-            messagebox.showwarning("No songs", "Sync or load a folder first.")
+    def _apply(self) -> None:
+        if not self._validate_form():
             return
-        indices = list(range(len(self.library.songs)))
-        self._apply_bulk_fields_to_indices(indices)
-        self._start_apply(indices)
+        self._sync_selection_from_tree()
+        selected_count = sum(1 for s in self.state.songs if s.selected)
+        if selected_count == 0:
+            messagebox.showwarning("No selection", "Select at least one song.")
+            return
+        if not messagebox.askyesno(
+            "Apply tags",
+            f"Apply tags to {selected_count} song(s)?\n\nBackups (.bak) will be created.",
+        ):
+            return
+        self._start_job(dry_run=False)
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
-        state = "disabled" if busy else "normal"
         self.cancel_button.configure(state="normal" if busy else "disabled")
 
     def _request_cancel(self) -> None:
         self._cancel_requested = True
-        self.progress_label.configure(text="Cancelling after current file...")
+        self._set_status("Cancelling after current file...")
 
-    def _start_apply(self, indices: list[int]) -> None:
-        if not self.library.folder:
-            messagebox.showwarning("No folder", "Choose a music folder first.")
-            return
+    def _start_job(self, dry_run: bool) -> None:
         if self._busy:
             return
-
         self._cancel_requested = False
         self._set_busy(True)
-        self.library.dry_run = self.dry_run_var.get()
-        self.last_result = None
+        options = self._job_options()
 
         def worker():
-            def on_progress(done, total, filename):
-                self.after(0, lambda: self._update_progress(done, total, filename))
+            try:
+                def on_progress(done, total, filename):
+                    self.after(0, lambda: self._update_progress(done, total, filename))
 
-            result = apply_songs(
-                self.library.folder,
-                self.library.songs,
-                indices,
-                self.config_data,
-                dry_run=self.library.dry_run,
-                on_progress=on_progress,
-                should_cancel=lambda: self._cancel_requested,
-            )
-            self.after(0, lambda: self._finish_apply(result))
+                result = apply_to_songs(
+                    self.state.songs,
+                    options,
+                    self.config_data,
+                    dry_run=dry_run,
+                    on_progress=on_progress,
+                    should_cancel=lambda: self._cancel_requested,
+                )
+                self.after(0, lambda: self._finish_job(result))
+            except Exception as exc:
+                self.after(0, lambda: self._finish_error(str(exc)))
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _update_progress(self, done: int, total: int, filename: str) -> None:
-        fraction = done / total if total else 0
-        self.progress.set(fraction)
-        prefix = "[dry-run] " if self.library.dry_run else ""
-        self.progress_label.configure(text=f"{prefix}Processing {done}/{total}: {filename}")
+        self.progress.set(done / total if total else 0)
+        self._set_status(f"Processing {done}/{total}: {filename}")
 
-    def _finish_apply(self, result) -> None:
+    def _finish_job(self, result) -> None:
         self.last_result = result
         self._set_busy(False)
-        self.progress.set(1 if result.total else 0)
-        save_library(self.library.songs, self.library.csv_path)
+        self.progress.set(1 if result.updated else 0)
         self._refresh_tree()
         self.summary_label.configure(
             text=(
-                f"Updated: {len(result.updated)}   "
-                f"Skipped: {len(result.skipped)}   "
-                f"Failed: {len(result.failed)}   "
+                f"Updated: {len(result.updated)}  "
+                f"Skipped: {len(result.skipped)}  "
+                f"Failed: {len(result.failed)}  "
                 f"Remuxed: {len(result.remuxed)}"
             )
         )
-        mode = "Dry-run complete." if result.dry_run else "Batch tagging complete."
-        self.progress_label.configure(text=mode)
+        self._set_status("Tags applied successfully." if not result.failed else "Finished with some errors.")
 
-    def _export_report(self) -> None:
-        if not getattr(self, "last_result", None):
-            messagebox.showwarning("No report", "Run Apply first to generate a report.")
-            return
-        path = filedialog.asksaveasfilename(
-            title="Save report",
-            defaultextension=".json",
-            filetypes=[("JSON", "*.json")],
-        )
-        if not path:
-            return
-        self.last_result.save_json(path)
-        messagebox.showinfo("Report saved", path)
+    def _finish_error(self, message: str) -> None:
+        self._set_busy(False)
+        messagebox.showerror("Error", message)
+        self._set_status(message)
 
     def _open_settings(self) -> None:
         summary = (
-            "watermark_patterns:\n"
-            "  - site watermarks to strip from titles\n\n"
-            "ffmpeg:\n"
-            f"  path: {self.config_data.ffmpeg_path}\n"
-            f"  timeout_seconds: {self.config_data.ffmpeg_timeout}\n\n"
-            "backup:\n"
-            f"  suffix: {self.config_data.backup_suffix}\n\n"
-            "defaults:\n"
-            f"  genre: {self.config_data.defaults.get('genre', '')}\n"
-            f"  comment: {self.config_data.defaults.get('comment', '')}\n"
+            f"site_names: (edit in config.yaml)\n"
+            f"comment: {self.config_data.default_comment}\n"
+            f"cover.size: {self.config_data.cover_size}\n"
+            f"cover.quality: {self.config_data.cover_quality}\n"
+            f"ffmpeg.path: {self.config_data.ffmpeg_path}\n"
         )
         SettingsDialog(self, summary)

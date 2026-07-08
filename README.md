@@ -105,7 +105,10 @@ Edit `config.yaml` in the project folder:
 python gui.py
 ```
 
-> **Note:** GUI is being rebuilt to match `tag.py`. Use the CLI for production tagging until the new GUI is released.
+1. **Browse** — pick your music folder  
+2. Fill **Artist** (required), genre, year, cover, mode  
+3. **Preview changes** — see what will change (no files modified)  
+4. **Apply tags** — write tags to selected songs
 
 ## Backups
 

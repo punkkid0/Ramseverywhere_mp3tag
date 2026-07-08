@@ -1,38 +1,42 @@
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from core.auto_tag import TagPreview
 
 
 @dataclass
-class SongRow:
-    filename: str
-    title: str = ""
-    year: str = ""
-    artist: str = ""
-    album: str = ""
-    track: str = ""
-    genre: str = ""
-    comment: str = ""
-    cover: str = ""
+class SongItem:
+    path: Path
+    preview: TagPreview | None = None
     status: str = "pending"
     message: str = ""
-    is_new: bool = False
+    selected: bool = True
 
-    def to_tags(self) -> dict[str, str]:
-        return {
-            "artist": self.artist,
-            "album": self.album,
-            "track": self.track,
-            "genre": self.genre,
-            "comment": self.comment,
-            "cover": self.cover,
-        }
+    @property
+    def filename(self) -> str:
+        return self.path.name
 
-    def has_tags_to_apply(self) -> bool:
-        return any(self.to_tags().values())
+    @property
+    def mode(self) -> str:
+        if self.preview:
+            return self.preview.mode
+        return ""
+
+    @property
+    def title_after(self) -> str:
+        if self.preview:
+            return self.preview.after.get("title", "")
+        return ""
+
+    @property
+    def artist_after(self) -> str:
+        if self.preview:
+            return self.preview.after.get("artist", "")
+        return ""
 
 
 @dataclass
 class AppState:
     folder: str = ""
-    csv_path: str = ""
-    songs: list[SongRow] = field(default_factory=list)
-    dry_run: bool = False
+    songs: list[SongItem] = field(default_factory=list)
+    last_result_summary: str = ""
