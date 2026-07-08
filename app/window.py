@@ -26,7 +26,7 @@ class Mp3TagApp(ctk.CTk):
         super().__init__()
 
         self.config_data = AppConfig.load()
-        self.state = AppState()
+        self.app_state = AppState()
         self._cancel_requested = False
         self._busy = False
         self.last_result = None
@@ -237,17 +237,17 @@ class Mp3TagApp(ctk.CTk):
             self._load_folder(folder)
 
     def _load_folder(self, folder: str) -> None:
-        self.state.folder = folder
+        self.app_state.folder = folder
         self.folder_var.set(folder)
-        self.state.songs = list_mp3_items(folder)
-        for song in self.state.songs:
+        self.app_state.songs = list_mp3_items(folder)
+        for song in self.app_state.songs:
             song.selected = True
         self._refresh_tree()
-        self._set_status(f"Loaded {len(self.state.songs)} song(s). Fill artist, then Preview or Apply.")
-        self.selection_label.configure(text=f"{len(self.state.songs)} songs")
+        self._set_status(f"Loaded {len(self.app_state.songs)} song(s). Fill artist, then Preview or Apply.")
+        self.selection_label.configure(text=f"{len(self.app_state.songs)} songs")
 
     def _browse_cover(self) -> None:
-        initial = self.state.folder or str(Path.home())
+        initial = self.app_state.folder or str(Path.home())
         path = filedialog.askopenfilename(
             title="Select cover image",
             initialdir=initial,
@@ -260,7 +260,7 @@ class Mp3TagApp(ctk.CTk):
         self.tree.delete(*self.tree.get_children())
         self._song_index_by_item.clear()
 
-        for index, song in enumerate(self.state.songs):
+        for index, song in enumerate(self.app_state.songs):
             preview = song.preview
             values = (
                 song.filename,
@@ -293,34 +293,34 @@ class Mp3TagApp(ctk.CTk):
 
     def _on_select(self, _event=None) -> None:
         selected = set(self._selected_indices())
-        for index, song in enumerate(self.state.songs):
+        for index, song in enumerate(self.app_state.songs):
             song.selected = index in selected
-        count = sum(1 for song in self.state.songs if song.selected)
+        count = sum(1 for song in self.app_state.songs if song.selected)
         self.selection_label.configure(text=f"{count} selected")
 
     def _select_all(self) -> None:
         self.tree.selection_set(self.tree.get_children())
-        for song in self.state.songs:
+        for song in self.app_state.songs:
             song.selected = True
-        self.selection_label.configure(text=f"{len(self.state.songs)} selected")
+        self.selection_label.configure(text=f"{len(self.app_state.songs)} selected")
 
     def _select_none(self) -> None:
         self.tree.selection_remove(self.tree.get_children())
-        for song in self.state.songs:
+        for song in self.app_state.songs:
             song.selected = False
         self.selection_label.configure(text="0 selected")
 
     def _validate_form(self) -> bool:
-        if not self.state.folder:
+        if not self.app_state.folder:
             messagebox.showwarning("No folder", "Choose a music folder first.")
             return False
         if not self.artist_var.get().strip():
             messagebox.showwarning("Artist required", "Enter an artist name.")
             return False
-        if not self.state.songs:
+        if not self.app_state.songs:
             messagebox.showwarning("No songs", "No MP3 files found in that folder.")
             return False
-        cover_error = validate_cover(self.state.songs, self.cover_var.get())
+        cover_error = validate_cover(self.app_state.songs, self.cover_var.get())
         if cover_error:
             messagebox.showerror("Cover not found", cover_error)
             return False
@@ -330,21 +330,21 @@ class Mp3TagApp(ctk.CTk):
         if not self._validate_form():
             return
         options = self._job_options()
-        build_previews(self.state.songs, options, self.config_data)
+        build_previews(self.app_state.songs, options, self.config_data)
         self._refresh_tree()
         self._set_status("Preview ready — no files were modified. Click Apply tags to write.")
 
     def _sync_selection_from_tree(self) -> None:
         selected = set(self._selected_indices())
         if selected:
-            for index, song in enumerate(self.state.songs):
+            for index, song in enumerate(self.app_state.songs):
                 song.selected = index in selected
 
     def _apply(self) -> None:
         if not self._validate_form():
             return
         self._sync_selection_from_tree()
-        selected_count = sum(1 for s in self.state.songs if s.selected)
+        selected_count = sum(1 for s in self.app_state.songs if s.selected)
         if selected_count == 0:
             messagebox.showwarning("No selection", "Select at least one song.")
             return
@@ -376,7 +376,7 @@ class Mp3TagApp(ctk.CTk):
                     self.after(0, lambda: self._update_progress(done, total, filename))
 
                 result = apply_to_songs(
-                    self.state.songs,
+                    self.app_state.songs,
                     options,
                     self.config_data,
                     dry_run=dry_run,
