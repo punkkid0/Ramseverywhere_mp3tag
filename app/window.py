@@ -264,8 +264,8 @@ class Mp3TagApp(ctk.CTk):
             preview = song.preview
             values = (
                 song.filename,
-                preview.title_after if preview else "",
-                preview.artist_after if preview else "",
+                song.title_after,
+                song.artist_after,
                 preview.after.get("album", "") if preview else "",
                 song.mode,
                 song.status,
