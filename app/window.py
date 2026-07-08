@@ -11,7 +11,8 @@ from app.models import AppState
 from app.services import (
     apply_to_songs,
     build_previews,
-    list_mp3_items,
+    list_mp3_items_from_file,
+    list_mp3_items_from_folder,
     validate_cover,
 )
 from app.settings_dialog import SettingsDialog
@@ -42,34 +43,43 @@ class Mp3TagApp(ctk.CTk):
         ctk.set_default_color_theme("green")
 
         self._build_layout()
-        self._set_status("Choose a music folder to get started.")
+        self._set_status("Choose a music folder or a single MP3 file to get started.")
 
     def _build_layout(self) -> None:
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
 
-        # --- Folder row ---
+        # --- Music source row ---
         folder_frame = ctk.CTkFrame(self)
         folder_frame.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
         folder_frame.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(folder_frame, text="Music folder:", width=100).grid(
+        ctk.CTkLabel(folder_frame, text="Music:", width=100).grid(
             row=0, column=0, padx=(12, 8), pady=12, sticky="w"
         )
-        self.folder_var = tk.StringVar()
-        ctk.CTkEntry(folder_frame, textvariable=self.folder_var).grid(
+        self.source_var = tk.StringVar()
+        ctk.CTkEntry(folder_frame, textvariable=self.source_var).grid(
             row=0, column=1, padx=8, pady=12, sticky="ew"
         )
-        ctk.CTkButton(folder_frame, text="Browse", width=90, command=self._browse_folder).grid(
-            row=0, column=2, padx=8, pady=12
-        )
+        ctk.CTkButton(
+            folder_frame, text="Browse folder", width=110, command=self._browse_folder
+        ).grid(row=0, column=2, padx=8, pady=12)
+        ctk.CTkButton(
+            folder_frame, text="Browse file", width=100, command=self._browse_file
+        ).grid(row=0, column=3, padx=8, pady=12)
         ctk.CTkButton(folder_frame, text="Settings", width=90, command=self._open_settings).grid(
-            row=0, column=3, padx=(8, 12), pady=12
+            row=0, column=4, padx=(8, 12), pady=12
         )
+        ctk.CTkLabel(
+            folder_frame,
+            text="Folder = album/bulk  |  File = single song",
+            text_color="#888888",
+            anchor="w",
+        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 6))
         self.chip_label = ctk.CTkLabel(
             folder_frame, text=self._chip_text(), anchor="e", text_color="#9cdcfe"
         )
-        self.chip_label.grid(row=1, column=0, columnspan=4, sticky="e", padx=12, pady=(0, 10))
+        self.chip_label.grid(row=1, column=2, columnspan=3, sticky="e", padx=12, pady=(0, 10))
 
         # --- Tag options ---
         opts = ctk.CTkFrame(self)
@@ -287,19 +297,48 @@ class Mp3TagApp(ctk.CTk):
         )
 
     def _browse_folder(self) -> None:
-        folder = filedialog.askdirectory(title="Select music folder")
+        folder = filedialog.askdirectory(parent=self, title="Select music folder")
         if folder:
-            self._load_folder(folder)
+            self._load_source(folder, "folder")
 
-    def _load_folder(self, folder: str) -> None:
-        self.app_state.folder = folder
-        self.folder_var.set(folder)
-        self.app_state.songs = list_mp3_items(folder)
+    def _browse_file(self) -> None:
+        initial = self.app_state.folder or str(Path.home())
+        file_path = filedialog.askopenfilename(
+            parent=self,
+            title="Select MP3 file",
+            initialdir=initial,
+            filetypes=[("MP3 files", "*.mp3"), ("All files", "*.*")],
+        )
+        if file_path:
+            self._load_source(file_path, "file")
+
+    def _load_source(self, path: str, source_type: str) -> None:
+        try:
+            if source_type == "folder":
+                songs = list_mp3_items_from_folder(path)
+                label = f"Folder: {path}"
+            else:
+                songs = list_mp3_items_from_file(path)
+                label = f"File: {Path(path).name}"
+        except ValueError as exc:
+            messagebox.showerror("Could not load", str(exc))
+            return
+
+        if not songs:
+            messagebox.showwarning("No MP3 files", "No MP3 files found in that location.")
+            return
+
+        self.app_state.source_path = path
+        self.app_state.source_type = source_type
+        self.source_var.set(label)
+        self.app_state.songs = songs
         for song in self.app_state.songs:
             song.selected = True
         self._refresh_tree()
-        self._set_status(f"Loaded {len(self.app_state.songs)} song(s). Fill artist, then Preview or Apply.")
-        self.selection_label.configure(text=f"{len(self.app_state.songs)} songs")
+        count = len(self.app_state.songs)
+        kind = "file" if source_type == "file" else "songs"
+        self._set_status(f"Loaded {count} {kind}. Fill artist, then Preview or Apply.")
+        self.selection_label.configure(text=f"{count} selected")
 
     def _toggle_cover_controls(self) -> None:
         enabled = self.use_custom_cover_var.get()
@@ -410,14 +449,14 @@ class Mp3TagApp(ctk.CTk):
         self.selection_label.configure(text="0 selected")
 
     def _validate_form(self) -> bool:
-        if not self.app_state.folder:
-            messagebox.showwarning("No folder", "Choose a music folder first.")
+        if not self.app_state.songs:
+            messagebox.showwarning(
+                "No music selected",
+                "Choose a folder (album/bulk) or a single MP3 file first.",
+            )
             return False
         if not self.artist_var.get().strip():
             messagebox.showwarning("Artist required", "Enter an artist name.")
-            return False
-        if not self.app_state.songs:
-            messagebox.showwarning("No songs", "No MP3 files found in that folder.")
             return False
         if self.use_custom_cover_var.get():
             if not self._cover_path:

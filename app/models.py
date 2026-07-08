@@ -37,6 +37,17 @@ class SongItem:
 
 @dataclass
 class AppState:
-    folder: str = ""
+    source_path: str = ""
+    source_type: str = ""  # "folder" or "file"
     songs: list[SongItem] = field(default_factory=list)
     last_result_summary: str = ""
+
+    @property
+    def folder(self) -> str:
+        """Directory used for cover lookup and display."""
+        if not self.source_path:
+            return ""
+        path = Path(self.source_path)
+        if self.source_type == "file":
+            return str(path.parent)
+        return str(path)

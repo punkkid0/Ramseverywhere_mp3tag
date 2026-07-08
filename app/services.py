@@ -12,9 +12,18 @@ from core.report import ProcessResult
 from core.tagger import resolve_cover_path
 
 
-def list_mp3_items(folder: str) -> list[SongItem]:
+def list_mp3_items_from_folder(folder: str) -> list[SongItem]:
     files = collect_mp3_files(folder=folder)
     return [SongItem(path=path) for path in files]
+
+
+def list_mp3_items_from_file(file_path: str) -> list[SongItem]:
+    path = Path(file_path)
+    if not path.is_file():
+        raise ValueError(f"File not found: {file_path}")
+    if path.suffix.lower() != ".mp3":
+        raise ValueError("Please select an .mp3 file.")
+    return [SongItem(path=path)]
 
 
 def build_previews(
