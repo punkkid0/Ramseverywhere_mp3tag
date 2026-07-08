@@ -86,7 +86,7 @@ class Mp3TagApp(ctk.CTk):
         self.year_var = tk.StringVar()
         self.album_var = tk.StringVar()
         self.track_var = tk.StringVar()
-        self.cover_display_var = tk.StringVar(value="No cover selected")
+        self.cover_display_var = tk.StringVar(value="Keeping existing cover on songs")
         self.mode_var = tk.StringVar(value="auto")
 
         fields = [
@@ -120,49 +120,64 @@ class Mp3TagApp(ctk.CTk):
             row=2, column=3, padx=6, pady=6, sticky="ew"
         )
 
+        self.use_custom_cover_var = tk.BooleanVar(value=False)
+        self.cover_display_var.set("Keeping existing cover on songs")
+
         ctk.CTkLabel(opts, text="Cover art:").grid(
             row=3, column=0, padx=(12, 6), pady=(6, 12), sticky="ne"
         )
         self.cover_thumb = ctk.CTkLabel(
             opts,
-            text="—",
+            text="♪",
             width=72,
             height=72,
             fg_color="#1a1a1a",
             corner_radius=6,
+            text_color="#666666",
         )
         self.cover_thumb.grid(row=3, column=1, padx=6, pady=(6, 12), sticky="nw")
 
         cover_info = ctk.CTkFrame(opts, fg_color="transparent")
-        cover_info.grid(row=3, column=2, columnspan=3, padx=6, pady=(6, 12), sticky="w")
+        cover_info.grid(row=3, column=2, columnspan=5, padx=6, pady=(6, 12), sticky="w")
+        self.replace_cover_check = ctk.CTkCheckBox(
+            cover_info,
+            text="Replace cover art (optional)",
+            variable=self.use_custom_cover_var,
+            command=self._toggle_cover_controls,
+        )
+        self.replace_cover_check.pack(anchor="w")
         ctk.CTkLabel(
             cover_info,
             textvariable=self.cover_display_var,
             anchor="w",
             font=ctk.CTkFont(weight="bold"),
-        ).pack(anchor="w")
+        ).pack(anchor="w", pady=(4, 0))
         ctk.CTkLabel(
             cover_info,
-            text="Leave empty to keep existing cover on each song",
+            text="Off = keep the image already downloaded with each song",
             text_color="#888888",
             anchor="w",
         ).pack(anchor="w", pady=(2, 8))
         cover_buttons = ctk.CTkFrame(cover_info, fg_color="transparent")
         cover_buttons.pack(anchor="w")
-        ctk.CTkButton(
+        self.select_cover_btn = ctk.CTkButton(
             cover_buttons,
             text="Select image...",
             width=120,
             command=self._browse_cover,
-        ).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(
+            state="disabled",
+        )
+        self.select_cover_btn.pack(side="left", padx=(0, 8))
+        self.clear_cover_btn = ctk.CTkButton(
             cover_buttons,
             text="Clear",
             width=70,
             fg_color="#555555",
             hover_color="#666666",
             command=self._clear_cover,
-        ).pack(side="left")
+            state="disabled",
+        )
+        self.clear_cover_btn.pack(side="left")
 
         # --- Actions ---
         actions = ctk.CTkFrame(self)
@@ -268,7 +283,7 @@ class Mp3TagApp(ctk.CTk):
             album=self.album_var.get().strip(),
             track=self.track_var.get().strip(),
             mode=self.mode_var.get().strip(),
-            cover=self._cover_path,
+            cover=self._cover_path if self.use_custom_cover_var.get() else "",
         )
 
     def _browse_folder(self) -> None:
@@ -286,7 +301,19 @@ class Mp3TagApp(ctk.CTk):
         self._set_status(f"Loaded {len(self.app_state.songs)} song(s). Fill artist, then Preview or Apply.")
         self.selection_label.configure(text=f"{len(self.app_state.songs)} songs")
 
+    def _toggle_cover_controls(self) -> None:
+        enabled = self.use_custom_cover_var.get()
+        state = "normal" if enabled else "disabled"
+        self.select_cover_btn.configure(state=state)
+        self.clear_cover_btn.configure(state=state)
+        if not enabled:
+            self._clear_cover(keep_checkbox=True)
+            self.cover_display_var.set("Keeping existing cover on songs")
+            self.cover_thumb.configure(text="♪")
+
     def _browse_cover(self) -> None:
+        if not self.use_custom_cover_var.get():
+            return
         initial = self.app_state.folder or str(Path.home())
         path = filedialog.askopenfilename(
             parent=self,
@@ -303,6 +330,8 @@ class Mp3TagApp(ctk.CTk):
             self._set_cover_image(path)
 
     def _set_cover_image(self, path: str) -> None:
+        self.use_custom_cover_var.set(True)
+        self._toggle_cover_controls()
         self._cover_path = path
         self.cover_display_var.set(Path(path).name)
         try:
@@ -315,11 +344,16 @@ class Mp3TagApp(ctk.CTk):
             logger.warning("Could not preview cover: %s", exc)
             self.cover_thumb.configure(image=None, text="IMG")
 
-    def _clear_cover(self) -> None:
+    def _clear_cover(self, keep_checkbox: bool = False) -> None:
         self._cover_path = ""
         self._cover_ctk_image = None
-        self.cover_display_var.set("No cover selected")
-        self.cover_thumb.configure(image=None, text="—")
+        self.cover_thumb.configure(image=None)
+        if self.use_custom_cover_var.get():
+            self.cover_display_var.set("No image selected yet")
+            self.cover_thumb.configure(text="—")
+        else:
+            self.cover_display_var.set("Keeping existing cover on songs")
+            self.cover_thumb.configure(text="♪")
 
     def _refresh_tree(self) -> None:
         self.tree.delete(*self.tree.get_children())
@@ -385,10 +419,18 @@ class Mp3TagApp(ctk.CTk):
         if not self.app_state.songs:
             messagebox.showwarning("No songs", "No MP3 files found in that folder.")
             return False
-        cover_error = validate_cover(self.app_state.songs, self._cover_path)
-        if cover_error:
-            messagebox.showerror("Cover not found", cover_error)
-            return False
+        if self.use_custom_cover_var.get():
+            if not self._cover_path:
+                messagebox.showwarning(
+                    "Cover optional",
+                    "Select an image, or uncheck 'Replace cover art' to keep "
+                    "the covers already on the songs.",
+                )
+                return False
+            cover_error = validate_cover(self.app_state.songs, self._cover_path)
+            if cover_error:
+                messagebox.showerror("Cover not found", cover_error)
+                return False
         return True
 
     def _preview(self) -> None:
