@@ -60,8 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--artist",
-        required=True,
-        help='Artist name, e.g. "Nathaniel Bassey" -> nathaniel-Bassey',
+        default="",
+        help=(
+            'Optional artist override. If omitted, uses the tag on each file '
+            '(formatted, e.g. "Nathaniel Bassey" -> nathaniel-Bassey).'
+        ),
     )
     parser.add_argument("--genre", default="", help="Genre for files that do not already have one")
     parser.add_argument("--year", default="", help="Year for files that do not already have one")

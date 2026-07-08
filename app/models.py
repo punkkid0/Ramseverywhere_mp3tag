@@ -2,37 +2,38 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.auto_tag import TagPreview
+from core.detection import detect_mode
 
 
 @dataclass
 class SongItem:
     path: Path
+    existing: dict[str, str] = field(default_factory=dict)
     preview: TagPreview | None = None
-    status: str = "pending"
+    status: str = "ready"
     message: str = ""
     selected: bool = True
+    has_cover: bool = False
+    cover_bytes: bytes | None = None
 
     @property
     def filename(self) -> str:
         return self.path.name
 
     @property
+    def display(self) -> dict[str, str]:
+        if self.preview:
+            return self.preview.after
+        return self.existing
+
+    @property
     def mode(self) -> str:
         if self.preview:
             return self.preview.mode
-        return ""
+        return detect_mode(self.existing.get("album", ""))
 
-    @property
-    def title_after(self) -> str:
-        if self.preview:
-            return self.preview.after.get("title", "")
-        return ""
-
-    @property
-    def artist_after(self) -> str:
-        if self.preview:
-            return self.preview.after.get("artist", "")
-        return ""
+    def field(self, name: str) -> str:
+        return self.display.get(name, "")
 
 
 @dataclass

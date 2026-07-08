@@ -24,4 +24,4 @@ Screenshot*.png
 # Build
 dist/
 build/
-*.spec
+*.exe

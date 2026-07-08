@@ -4,6 +4,7 @@ from pathlib import Path
 import yaml
 
 from core.cleaners import DEFAULT_SITE_NAMES, build_site_patterns
+from core.paths import app_root, bundled_config_path, is_frozen
 
 DEFAULT_CONFIG_NAME = "config.yaml"
 DEFAULT_COMMENT = "downloaded from jointearn.com"
@@ -63,9 +64,23 @@ class AppConfig:
                 return cls()
             return cls.from_dict(_read_yaml(path))
 
-        for candidate in (Path.cwd() / DEFAULT_CONFIG_NAME, _package_root() / DEFAULT_CONFIG_NAME):
+        search_roots = [Path.cwd(), _package_root()]
+        if is_frozen():
+            search_roots.insert(0, app_root())
+
+        seen: set[Path] = set()
+        for root in search_roots:
+            root = root.resolve()
+            if root in seen:
+                continue
+            seen.add(root)
+            candidate = root / DEFAULT_CONFIG_NAME
             if candidate.exists():
                 return cls.from_dict(_read_yaml(candidate))
+
+        bundled = bundled_config_path()
+        if bundled.exists():
+            return cls.from_dict(_read_yaml(bundled))
 
         return cls()
 

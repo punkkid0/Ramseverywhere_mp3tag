@@ -131,9 +131,6 @@ def process_files(
     active_config = config or AppConfig()
     result = ProcessResult(dry_run=dry_run)
 
-    if not options.artist.strip():
-        raise ValueError("Artist is required. Use --artist \"Nathaniel Bassey\"")
-
     for file_path in files:
         if file_path.suffix.lower() != ".mp3":
             result.skipped.append(file_path.name)
@@ -147,6 +144,15 @@ def process_files(
 
         existing = read_tags_from_file(file_path)
         tags = build_auto_tags(file_path, existing, options, active_config)
+
+        if not tags.get("artist", "").strip():
+            result.skipped.append(file_path.name)
+            result.add_detail(
+                file_path.name,
+                "skipped",
+                "No artist on file — add a tag to the MP3 or pass --artist",
+            )
+            continue
 
         if dry_run:
             result.updated.append(file_path.name)

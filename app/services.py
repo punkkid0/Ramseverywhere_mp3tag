@@ -9,7 +9,22 @@ from core.auto_tag import (
 )
 from core.config import AppConfig
 from core.report import ProcessResult
-from core.tagger import resolve_cover_path
+from core.detection import detect_mode
+from core.tagger import read_embedded_cover, read_tags_from_file, resolve_cover_path
+
+
+def enrich_song_with_existing(song: SongItem) -> None:
+    """Load current tags and cover art from the MP3 file."""
+    song.existing = read_tags_from_file(song.path)
+    song.cover_bytes = read_embedded_cover(song.path)
+    song.has_cover = bool(song.cover_bytes)
+    song.status = "ready"
+    song.message = detect_mode(song.existing.get("album", ""))
+
+
+def enrich_songs_with_existing(songs: list[SongItem]) -> None:
+    for song in songs:
+        enrich_song_with_existing(song)
 
 
 def list_mp3_items_from_folder(folder: str) -> list[SongItem]:
@@ -60,9 +75,6 @@ def apply_to_songs(
 ) -> ProcessResult:
     selected = [song for song in songs if song.selected]
 
-    if not options.artist.strip():
-        raise ValueError("Artist is required.")
-
     if not selected:
         raise ValueError("Select at least one song.")
 
@@ -86,7 +98,8 @@ def apply_to_songs(
             detail = file_result.details[0]
             song.status = detail.status
             song.message = detail.message
-        if not dry_run and song.status in {"updated", "preview"}:
+        if not dry_run and song.status == "updated":
+            enrich_song_with_existing(song)
             song.preview = preview_tags(song.path, options, config)
 
     return merged

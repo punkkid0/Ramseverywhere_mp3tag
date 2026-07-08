@@ -50,6 +50,21 @@ class AutoTagTests(unittest.TestCase):
         self.assertEqual(tags["genre"], "Worship")
         self.assertEqual(tags["album_artist"], "nathaniel-Bassey")
 
+    def test_uses_existing_artist_when_option_blank(self):
+        existing = {
+            "title": "Skilful",
+            "year": "",
+            "artist": "Nathaniel Bassey",
+            "album": "",
+            "track": "",
+            "genre": "",
+            "comment": "",
+        }
+        options = TagJobOptions()
+        tags = build_auto_tags(Path("skilful.mp3"), existing, options, AppConfig())
+
+        self.assertEqual(tags["artist"], "nathaniel-Bassey")
+
     def test_track_from_filename_when_missing(self):
         existing = {
             "title": "Holy Spirit",

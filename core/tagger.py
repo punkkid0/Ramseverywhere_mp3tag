@@ -100,6 +100,23 @@ def _extract_cover_frames(audio: MP3) -> list[APIC]:
     return list(audio.tags.getall("APIC"))
 
 
+def read_embedded_cover(file_path: Path) -> bytes | None:
+    """Return raw cover image bytes from an MP3, if present."""
+    if file_path.suffix.lower() != ".mp3":
+        return None
+    try:
+        audio = _load_mp3(file_path)
+        if audio.tags:
+            frames = audio.tags.getall("APIC")
+            if frames:
+                return frames[0].data
+        tag_source = ID3(str(file_path))
+        frames = tag_source.getall("APIC")
+        return frames[0].data if frames else None
+    except Exception:
+        return None
+
+
 def read_tags_from_file(file_path: Path) -> dict[str, str]:
     fields = {
         "title": "",
