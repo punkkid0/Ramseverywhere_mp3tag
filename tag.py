@@ -81,7 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Cover image for the batch/file. Existing cover is kept if this is omitted.",
     )
-    parser.add_argument("--comment", default="", help="Override the default comment")
+    parser.add_argument(
+        "--comment",
+        default="",
+        help="ID3 comment text (any string). Overrides config.yaml. Leave blank to skip or keep existing.",
+    )
     parser.add_argument("--config", help="Path to config.yaml")
     parser.add_argument("--dry-run", action="store_true", help="Preview tags without writing")
     parser.add_argument("--report", help="Save JSON report to this path")

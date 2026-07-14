@@ -1,6 +1,6 @@
 # Ramseverywhere MP3 Tag
 
-Bulk auto-tagging tool for downloaded MP3s. Cleans site watermarks from titles, formats artist names, handles singles vs albums, embeds cover art (auto square resize), and sets a default comment.
+Bulk auto-tagging tool for downloaded MP3s. Cleans site watermarks from titles, formats artist names, handles singles vs albums, embeds cover art (auto square resize), and lets **you** set any comment text you want (or none).
 
 ## Requirements
 
@@ -63,13 +63,13 @@ Remove `--dry-run` when you are ready to write tags.
 
 | Field | Rule |
 |-------|------|
-| **Title** | Strips site names (CeeNaija, JustNaija, waploaded, jointearn, etc.) |
+| **Title** | Strips common download-site watermarks (CeeNaija, JustNaija, waploaded, etc.) |
 | **Artist** | `Nathaniel Bassey` → `nathaniel-Bassey` |
 | **Year** | Keeps existing tag, or uses `--year` |
 | **Album** | Single → `Title (single)`; album → keeps existing album name |
 | **Track** | Single → `1`; album → existing tag or number from filename (`03 song.mp3`) |
 | **Genre** | Uses `--genre` if provided, else keeps existing |
-| **Comment** | `downloaded from jointearn.com` (editable in `config.yaml`) |
+| **Comment** | **Your choice** — CLI `--comment`, GUI field, or `config.yaml`. Empty = keep existing / write nothing |
 | **Album artist** | Set for albums; empty for singles |
 | **Cover** | Keeps existing art unless `--cover` is set; new images are cropped to 1000×1000 |
 
@@ -86,18 +86,35 @@ Remove `--dry-run` when you are ready to write tags.
 | `--track` | Manual track override |
 | `--mode` | `auto`, `single`, or `album` |
 | `--cover` | Cover image path |
+| `--comment` | Any comment text you want (overrides config) |
 | `--dry-run` | Preview only — **does not modify files** |
 | `--config` | Path to custom `config.yaml` |
 | `--report` | Save JSON report after run |
+
+### Comment examples
+
+```powershell
+# One-off (any text)
+python tag.py --folder "C:\Music\Batch" --artist "Sinach" --comment "personal library 2026"
+
+# Or set a personal default in config.yaml (see below), then omit --comment
+```
 
 ## Configuration
 
 Edit `config.yaml` in the project folder:
 
-- `site_names` — sites to strip from titles  
-- `tags.comment` — default comment text  
+- `site_names` — watermarks to strip from titles (add/remove freely)  
+- `tags.comment` — optional default comment (**any string**, or `""` for none)  
 - `cover.size` — embedded cover size in pixels (default `1000`)  
 - `ffmpeg.path` — path to ffmpeg executable  
+
+Example — your own default comment:
+
+```yaml
+tags:
+  comment: "ripped for personal use"
+```
 
 ## Desktop GUI
 
@@ -106,7 +123,7 @@ python gui.py
 ```
 
 1. **Browse** — pick your music folder  
-2. Fill **Artist** (required), genre, year, cover, mode  
+2. Fill **Artist** (required), genre, year, **comment** (optional — any text), cover, mode  
 3. **Preview changes** — see what will change (no files modified)  
 4. **Apply tags** — write tags to selected songs
 

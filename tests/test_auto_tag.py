@@ -27,8 +27,58 @@ class AutoTagTests(unittest.TestCase):
         self.assertEqual(tags["album"], "Way Maker (single)")
         self.assertEqual(tags["track"], "1")
         self.assertEqual(tags["genre"], "Gospel")
-        self.assertEqual(tags["comment"], "downloaded from jointearn.com")
+        # No hard-coded brand comment — empty unless user/config sets one
+        self.assertEqual(tags["comment"], "")
         self.assertEqual(tags["album_artist"], "")
+
+    def test_comment_from_options_any_text(self):
+        existing = {
+            "title": "Grace",
+            "year": "",
+            "artist": "",
+            "album": "",
+            "track": "",
+            "genre": "",
+            "comment": "",
+        }
+        options = TagJobOptions(
+            artist="Artist",
+            comment="whatever the user wants — personal library",
+        )
+        tags = build_auto_tags(Path("grace.mp3"), existing, options, AppConfig())
+        self.assertEqual(
+            tags["comment"],
+            "whatever the user wants — personal library",
+        )
+
+    def test_comment_from_config_yaml(self):
+        existing = {
+            "title": "Grace",
+            "year": "",
+            "artist": "",
+            "album": "",
+            "track": "",
+            "genre": "",
+            "comment": "",
+        }
+        config = AppConfig(default_comment="from my config")
+        options = TagJobOptions(artist="Artist")
+        tags = build_auto_tags(Path("grace.mp3"), existing, options, config)
+        self.assertEqual(tags["comment"], "from my config")
+
+    def test_keeps_existing_comment_when_user_leaves_blank(self):
+        existing = {
+            "title": "Grace",
+            "year": "",
+            "artist": "",
+            "album": "",
+            "track": "",
+            "genre": "",
+            "comment": "already on file",
+        }
+        options = TagJobOptions(artist="Artist")
+        tags = build_auto_tags(Path("grace.mp3"), existing, options, AppConfig())
+        self.assertEqual(tags["comment"], "already on file")
 
     def test_album_rules_trust_existing_album(self):
         existing = {

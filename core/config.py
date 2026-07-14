@@ -7,7 +7,8 @@ from core.cleaners import DEFAULT_SITE_NAMES, build_site_patterns
 from core.paths import app_root, bundled_config_path, is_frozen
 
 DEFAULT_CONFIG_NAME = "config.yaml"
-DEFAULT_COMMENT = "downloaded from jointearn.com"
+# Empty by default — users set any comment via CLI --comment, GUI, or config.yaml
+DEFAULT_COMMENT = ""
 
 
 @dataclass
@@ -36,20 +37,24 @@ class AppConfig:
         tags = data.get("tags", {})
         cover = data.get("cover", {})
 
+        # Prefer tags.comment, then defaults.comment; empty string is allowed (user chooses).
+        raw_comment = tags.get("comment", defaults.get("comment", DEFAULT_COMMENT))
+        if raw_comment is None:
+            raw_comment = DEFAULT_COMMENT
+        user_comment = str(raw_comment)
+
         config = cls(
             site_names=list(site_names) if site_names else list(DEFAULT_SITE_NAMES),
             watermark_patterns=list(patterns) if patterns else [],
             ffmpeg_path=str(ffmpeg.get("path", "ffmpeg")),
             ffmpeg_timeout=int(ffmpeg.get("timeout_seconds", 60)),
             backup_suffix=str(backup.get("suffix", ".bak")),
-            default_comment=str(
-                tags.get("comment", defaults.get("comment", DEFAULT_COMMENT))
-            ),
+            default_comment=user_comment,
             cover_size=int(cover.get("size", 1000)),
             cover_quality=int(cover.get("quality", 90)),
             defaults={
                 "genre": str(defaults.get("genre", "")),
-                "comment": str(defaults.get("comment", DEFAULT_COMMENT)),
+                "comment": user_comment,
             },
         )
         if not config.watermark_patterns:

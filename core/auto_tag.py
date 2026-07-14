@@ -71,10 +71,13 @@ def build_auto_tags(
     )
 
     genre = options.genre.strip() or existing.get("genre", "").strip()
+    # Priority: CLI/GUI --comment → config.yaml tags.comment → keep file's existing comment
+    # Empty at every level is fine — user decides the text (or no comment at all).
     comment = (
         options.comment.strip()
-        or config.default_comment
+        or (config.default_comment or "").strip()
         or config.defaults.get("comment", "").strip()
+        or existing.get("comment", "").strip()
     )
 
     tags = {

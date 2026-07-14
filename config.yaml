@@ -15,8 +15,12 @@ site_names:
   - justnaija.com
   - justnaija
 
+# Comment is fully user-defined. Leave empty, or set any text you want, e.g.:
+#   comment: "ripped for personal library"
+#   comment: "My Archive 2026"
+# CLI --comment and the GUI Comment field override this per run.
 tags:
-  comment: "downloaded from jointearn.com"
+  comment: ""
 
 cover:
   size: 1000       # square pixels (1000x1000) — standard album art
